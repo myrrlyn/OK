@@ -3,7 +3,7 @@ defmodule OK.Pipe do
 
   defmacro __using__(_options) do
     quote do
-      import OK, only: [~>: 2, ~>>: 2]
+      import OK, only: [~>: 2, ~>>: 2, <~: 2, <<~: 2, <~>: 2, <|>: 2]
     end
   end
 end

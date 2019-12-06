@@ -1,6 +1,6 @@
 defmodule OKTest do
   use ExUnit.Case
-  import OK, only: [~>>: 2, ~>: 2, success: 1, failure: 1]
+  import OK, only: [~>>: 2, ~>: 2, <~: 2, <<~: 2, <~>: 2, <|>: 2, success: 1, failure: 1]
   doctest OK
 
   test "matching on a success case" do

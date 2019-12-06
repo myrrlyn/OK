@@ -52,6 +52,92 @@ defmodule OK do
   def flat_map({:error, reason}, _func), do: {:error, reason}
 
   @doc """
+  Applies a function to the interior error of a result tuple.
+
+  If the tuple is tagged `:error`, the value will be mapped by the function.
+  A tuple tagged `:ok` will be unchanged.
+
+  ## Examples
+
+  ```elixir
+  iex> OK.map_err({:error, :message}, fn (e) -> e |> to_string |> String.capitalize end)
+  {:error, "Message"}
+
+  iex> OK.map_err({:ok, nil}, fn (e) -> e |> to_string end)
+  {:ok, nil}
+  ```
+  """
+  @spec map_err({:ok, value}, (any -> any)) :: {:ok, value} when value: any
+  @spec map_err({:error, a}, (a -> b)) :: {:error, b} when a: any, b: any
+  def map_err({:ok, value}, _func), do: {:ok, value}
+  def map_err({:error, err}, func) when is_function(func, 1), do: {:error, func.(err)}
+
+  @doc """
+  Takes a result tuple and a next function.
+  If the result tuple is tagged as a success then the next function is skipped.
+  If the tag is failure then its value will be passed to the next function.
+
+  ## Examples
+
+  ```elixir
+  iex> OK.flat_map_err({:error, :message}, fn (_) -> {:ok, :replacement} end)
+  {:ok, :replacement}
+
+  iex> OK.flat_map_err({:ok, :value}, fn (_) -> {:ok, :replacement} end)
+  {:ok, :value}
+  ```
+  """
+  @spec flat_map_err({:ok, value} | {:error, a}, (a -> {:ok, value} | {:error, b})) ::
+          {:ok, value} | {:error, b}
+        when a: any, b: any, value: any
+  def flat_map_err({:ok, value}, _func), do: {:ok, value}
+  def flat_map_err({:error, err}, func) when is_function(func, 1), do: func.(err)
+
+  @doc """
+  Provides a replacement success value for an error.
+
+  If the result tuple is already `:ok`, this returns it unchanged.
+  If the result tuple is `:error`, this uses the alternate `value` to produce `{:ok, value}`.
+
+  ## Examples
+
+  ```elixir
+  iex> OK.ok_or({:ok, :good}, :fallback)
+  {:ok, :good}
+
+  iex> OK.ok_or({:error, nil}, :fallback)
+  {:ok, :fallback}
+  ```
+  """
+  @spec ok_or({:ok, value}, value) :: {:ok, value} when value: any
+  def ok_or({:ok, value}, _value), do: {:ok, value}
+  def ok_or({:error, _}, value), do: {:ok, value}
+
+  @doc """
+  Computes a replacement success value for an error.
+
+  If the result tuple is already `:ok`, this returns it unchanged.
+  If the result tuple is `:error`, this uses the alternate `func`tion to compute `{:ok, func.()}`.
+
+  Prefer this function to `ok_or` when the replacement value is expensive to
+  compute, or alters state, and so should only be computed lazily, rather than
+  eagerly. Elixir computes function arguments before entering the call.
+
+  ## Examples
+
+  ```elixir
+  iex> OK.ok_or_else({:ok, :good}, fn (_) -> :fallback end)
+  {:ok, :good}
+
+  iex> OK.ok_or_else({:error, nil}, fn (_) -> :fallback end)
+  {:ok, :fallback}
+  ```
+  """
+  @spec ok_or_else({:ok, value} | {:error, any}, (() -> value)) :: {:ok, value} when value: any
+  def ok_or_else({:ok, value}, _func), do: {:ok, value}
+  def ok_or_else({:error, err}, func) when is_function(func, 1), do: {:ok, func.(err)}
+
+  @doc """
   Transform every element of a list with a mapping function.
   The mapping function must return a result tuple.
 
@@ -179,12 +265,12 @@ defmodule OK do
       iex> require OK
       ...> f = fn result when OK.is_success(result) -> "ok" end
       ...> f.({:error, :some_reason})
-      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest.\"doctest OK.is_success/1 (31)\"/1
+      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest.\"doctest OK.is_success/1 (54)\"/1
 
       iex> require OK
       ...> f = fn result when OK.is_success(result) -> "ok" end
       ...> f.(nil)
-      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest.\"doctest OK.is_success/1 (32)\"/1
+      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest.\"doctest OK.is_success/1 (55)\"/1
   """
   @spec is_success(term()) :: Macro.t()
   defguard is_success(result)
@@ -207,12 +293,12 @@ defmodule OK do
       iex> require OK
       ...> f = fn result when OK.is_failure(result) -> "error" end
       ...> f.({:ok, "some value"})
-      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest."doctest OK.is_failure/1 (28)"/1
+      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest."doctest OK.is_failure/1 (51)"/1
 
       iex> require OK
       ...> f = fn result when OK.is_failure(result) -> "error" end
       ...> f.(nil)
-      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest.\"doctest OK.is_failure/1 (29)\"/1
+      ** (FunctionClauseError) no function clause matching in anonymous fn/1 in OKTest.\"doctest OK.is_failure/1 (52)\"/1
   """
   @spec is_failure(term()) :: Macro.t()
   defguard is_failure(result)
@@ -362,6 +448,147 @@ defmodule OK do
 
     quote do
       OK.flat_map(unquote(lhs), fn unquote(value) -> unquote({call, line, args}) end)
+    end
+  end
+
+  @doc """
+  Pipeline version of `map_err/2`.
+
+  ## Examples
+
+  ```elixir
+  iex> {:ok, 5} <~ Integer.to_string
+  {:ok, 5}
+
+  iex> {:error, :message} <~ to_string <~ String.capitalize
+  {:error, "Message"}
+  ```
+  """
+  defmacro lhs <~ {call, line, args} do
+    value = quote do: value
+    args = [value | args || []]
+
+    quote do
+      OK.map_err(unquote(lhs), fn unquote(value) -> unquote({call, line, args}) end)
+    end
+  end
+
+  @doc """
+  The OK result pipe operator `<<~`, or result monad `flat_map_err` operator, is
+  similar to Elixir’s native `|>` except it is used within the error path. It
+  takes the error out of an `{:error, err_value}` tuple and passes it as the
+  first argumnet to the function call on the right. The right call is expected
+  to return a result tuple, of either `:ok` or `:error`.
+
+  It can be used in several ways.
+
+  Pipe to a local call. *(This is equivalent to calling `double(5)`)
+
+  ```elixir
+  iex> {:error, 5} <<~ double()
+  {:ok, 10}
+  ```
+
+  Pipe to a remote call. *(This is equivalent to calling `OKTest.double(5)`)*
+
+  ```elixir
+  iex> {:error, 5} <<~ OKTest.double()
+  {:ok, 10}
+
+  iex> {:error, 5} <<~ __MODULE__.double()
+  {:ok, 10}
+  ```
+
+  Pipe with extra arguments. *(This is equivalent to calling `safe_div(6, 2)`)*
+
+  ```elixir
+  iex> {:error, 6} <<~ safe_div(2)
+  {:ok, 3.0}
+
+  iex> {:error, 6} <<~ safe_div(0)
+  {:error, :zero_division}
+  ```
+
+  It also works with anonymous functions.
+
+  ```elixir
+  iex> {:error, 3} <<~ (fn (x) -> {:ok, x + 1} end).()
+  {:ok, 4}
+
+  iex> {:error, 6} <<~ decrement().(2)
+  {:ok, 4}
+  ```
+
+  When a success is returned anywhere in the pipeline, it will be returned
+  without invoking subsequent error modifiers. This is because `<<~` and
+  `flat_map_err` are only useful to handle failures, and are not needed on
+  successes. Use `~>>` and `flat_map` for ongoing computation, and the error
+  paths only for immediate error recovery and continuation.
+
+  ```elixir
+  iex> {:error, 6} <<~ double() <<~ safe_div(2)
+  {:ok, 12}
+
+  iex> {:ok, 6} <<~ safe_div(0) <<~ double()
+  {:ok, 6}
+  ```
+  """
+  defmacro lhs <<~ {call, line, args} do
+    value = quote do: value
+    args = [value | args || []]
+
+    quote do
+      OK.flat_map_err(unquote(lhs), fn unquote(value) -> unquote({call, line, args}) end)
+    end
+  end
+
+  @doc """
+  Pipeline version of `ok_or`.
+
+  This operator takes a result tuple and, if it is success, returns it
+  unmodified. If the tuple is an error, then it wraps the right-hand value in
+  `{:ok, v}` and produces it. This is useful for providing an immediate fallback
+  value to a fallible computation without breaking the rest of the data flow.
+
+  ## Examples
+
+  ```elixir
+  iex> {:ok, 5} <|> 6
+  {:ok, 5}
+
+  iex> {:error, nil} <|> 6
+  {:ok, 6}
+  ```
+  """
+  defmacro lhs <|> value do
+    quote do
+      OK.ok_or(unquote(lhs), unquote(value))
+    end
+  end
+
+  @doc """
+  Pipeline version of `ok_or_else`.
+
+  This operator takes a result tuple and, if it is success, returns it
+  unmodified. If the tuple is an error, then it passes the error value into the
+  right-hand function, executes it, and returns the result wrapped in
+  `{:ok, rhs()}`.
+
+  ## Examples
+
+  ```elixir
+  iex> {:ok, 5} <~> (fn (err) -> err |> to_string |> String.length end).()
+  {:ok, 5}
+
+  iex> {:error, :unknown} <~> (fn (err) -> err |> to_string |> String.length end).()
+  {:ok, 7}
+  """
+  defmacro lhs <~> {call, line, args} do
+    value = quote do: value
+    args = [value | args || []]
+
+    quote do
+      OK.ok_or_else(unquote(lhs), fn unquote(value) -> unquote({call, line, args}) end)
     end
   end
 
